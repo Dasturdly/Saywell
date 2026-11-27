@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Saywell settings</title>
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body class="window">
+  <main>
+    <header class="brand rise">
+      <div class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      <div>
+        <h1>Saywell</h1>
+        <div class="status" id="status">…</div>
+      </div>
+    </header>
+
+    <section class="rise">
+      <div class="eyebrow">Dictation key</div>
+      <div class="card">
+        <div class="row">
+          <div>
+            <div class="label">Hold to talk</div>
+            <div class="desc" id="key-desc">Hold the key, speak, let go. The text is typed where your cursor is.</div>
+          </div>
+          <button class="keycap" id="keycap" title="Click, then press the key you want to use">…</button>
+        </div>
+        <div class="error" id="key-error" role="alert"></div>
+        <div class="row">
+          <div>
+            <div class="label">Double-tap for hands-free</div>
+            <div class="desc">Tap the key twice quickly to keep recording without holding it. Tap again to finish, Esc to cancel.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="double_tap_hands_free" aria-label="Double-tap for hands-free"></label>
+        </div>
+      </div>
+    </section>
+
+    <section class="rise">
+      <div class="eyebrow">Sound and text</div>
+      <div class="card">
+        <div class="row">
+          <div>
+            <div class="label">Microphone</div>
+            <div class="desc">Used from the next dictation on.</div>
+          </div>
+          <select id="mic" aria-label="Microphone"></select>
+        </div>
+        <div class="row">
+          <div>
+            <div class="label">Clean up text with local AI</div>
+            <div class="desc">Removes "um", repeats and false starts, and fixes punctuation. Runs on your graphics card; turning it off frees about 3.5&nbsp;GB of video memory.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="cleanup_enabled" aria-label="Clean up text with local AI"></label>
+        </div>
+        <div class="row">
+          <div>
+            <div class="label">Show words while speaking</div>
+            <div class="desc">A rough caption above the floating bar. The final text is worked out again when you finish.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="preview_caption" aria-label="Show words while speaking"></label>
+        </div>
+      </div>
+    </section>
+
+    <section class="rise">
+      <div class="eyebrow">System</div>
+      <div class="card">
+        <div class="row">
+          <div>
+            <div class="label">Start with Windows</div>
+            <div class="desc">Saywell waits quietly in the tray.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="start_with_windows" aria-label="Start with Windows"></label>
+        </div>
+        <div class="row">
+          <div>
+            <div class="label">Private by design</div>
+            <div class="desc">Speech and text never leave this PC. Models are stored in <span class="path" id="models_dir"></span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="note rise"><span id="saved" class="saved"></span><span id="version"></span></footer>
+  </main>
+  <script src="keys.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>

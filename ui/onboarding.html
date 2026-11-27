@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Welcome to Saywell</title>
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="onboarding.css">
+</head>
+<body class="window">
+  <main>
+    <header class="brand rise">
+      <div class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="eyebrow" id="step-label">Step 1 of 2 · Setup</div>
+    </header>
+
+    <!-- Step 1: models -->
+    <section id="step-models">
+      <h1 class="rise">Talk, and it types.<br><span class="soft">Entirely on this PC.</span></h1>
+      <p class="lede rise">Saywell needs two model files to understand speech and tidy the text. They're downloaded once and then everything runs offline: your voice and words never leave this computer.</p>
+
+      <div class="models rise" id="models"></div>
+
+      <div class="actions rise">
+        <div class="note" id="total"></div>
+        <div class="buttons">
+          <button id="download" class="primary">Download</button>
+          <button id="continue" class="primary" hidden>Continue</button>
+        </div>
+      </div>
+      <div class="error" id="dl-error" role="alert"></div>
+      <details class="manual rise">
+        <summary>I already have the files</summary>
+        <p class="note">Copy them into <span class="path" id="models_dir"></span> and click <em>Check again</em>.</p>
+        <div class="buttons"><button id="open-dir">Open folder</button><button id="recheck">Check again</button></div>
+      </details>
+    </section>
+
+    <!-- Step 2: try it -->
+    <section id="step-try" hidden>
+      <h1 class="rise">Give it a try.</h1>
+      <p class="lede rise">Click the box below. Then <b>hold <span class="keycap small" id="key"></span></b>, say a sentence, and let go.</p>
+      <div class="engine rise"><span class="dot" id="engine-dot"></span><span id="engine">Loading the speech model…</span></div>
+      <textarea id="try" class="rise" rows="5" placeholder="Your words will appear here."></textarea>
+      <ul class="tips rise">
+        <li><b>Double-tap</b> the key to keep talking hands-free; tap again to finish.</li>
+        <li><b>Esc</b> cancels while you're talking.</li>
+        <li>Change the key, microphone and more from the tray icon → <b>Settings</b>.</li>
+      </ul>
+      <div class="actions rise"><span></span><button id="done" class="primary">Done</button></div>
+    </section>
+  </main>
+  <script src="keys.js"></script>
+  <script src="onboarding.js"></script>
+</body>
+</html>

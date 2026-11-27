@@ -1,0 +1,108 @@
+/* Compact floating bar: a small dark capsule with a live waveform. It morphs between states. */
+html, body.overlay {
+  background: transparent;
+  overflow: hidden;
+  height: 100%;
+  user-select: none;
+  cursor: default;
+}
+
+.stage {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+
+.pill {
+  --w: 168px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--w);
+  height: 38px;
+  border-radius: 19px;
+  background: #0e1117;
+  border: 1px solid rgba(242, 165, 65, 0.16);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  opacity: 0;
+  transform: translateY(8px) scale(0.92);
+  transition:
+    width 0.28s cubic-bezier(.3,.8,.3,1),
+    opacity 0.16s ease,
+    transform 0.24s cubic-bezier(.3,.8,.3,1),
+    border-color 0.2s, box-shadow 0.2s;
+}
+.pill:not([data-state="hidden"]) { opacity: 1; transform: none; }
+
+/* Waveform: thin bars that scroll in from the right as you speak. */
+.wave { display: flex; align-items: center; gap: 2px; height: 24px; }
+.wave i {
+  display: block;
+  width: 2.5px;
+  height: 3px;
+  border-radius: 2px;
+  background: #efe8dc;
+  opacity: 0.9;
+}
+.wave i:nth-last-child(-n+3) { background: var(--amber); opacity: 1; }
+
+/* Recording dot, shown in hands-free mode. */
+.rec {
+  position: absolute;
+  left: 14px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--amber);
+  opacity: 0;
+  transform: scale(0.4);
+  transition: opacity 0.2s, transform 0.2s;
+}
+.pill[data-state="handsfree"] { --w: 196px; border-color: rgba(242, 165, 65, 0.55); box-shadow: 0 6px 18px rgba(0,0,0,.35), 0 0 0 3px rgba(242, 165, 65, 0.12); }
+.pill[data-state="handsfree"] .rec { opacity: 1; transform: none; animation: beat 1.4s ease-in-out infinite; }
+.pill[data-state="handsfree"] .wave { margin-left: 14px; }
+@keyframes beat { 50% { opacity: 0.35; } }
+
+/* Writing: the capsule shrinks to three pulsing dots. */
+.dots { display: none; gap: 6px; }
+.dots i { width: 6px; height: 6px; border-radius: 50%; background: #efe8dc; animation: dot 1s ease-in-out infinite; }
+.dots i:nth-child(2) { animation-delay: 0.15s; }
+.dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes dot { 0%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+.pill[data-state="thinking"] { --w: 76px; }
+.pill[data-state="thinking"] .wave { display: none; }
+.pill[data-state="thinking"] .dots { display: flex; }
+
+/* Error: a short message in place of the waveform. */
+.msg { display: none; padding: 0 16px; font: 500 13px/1 var(--body); color: #f6c9bd; white-space: nowrap; }
+.pill[data-state="error"] { --w: auto; border-color: rgba(239, 122, 93, 0.5); }
+.pill[data-state="error"] .wave { display: none; }
+.pill[data-state="error"] .msg { display: block; }
+
+/* Optional caption (Settings → "Show words while speaking"). Newest words stay visible. */
+.caption {
+  max-width: 420px;
+  padding: 5px 12px;
+  border-radius: 10px;
+  background: rgba(14, 17, 23, 0.82);
+  color: #e6e0d4;
+  font: 13px/1.3 var(--body);
+  white-space: nowrap;
+  overflow: hidden;
+  direction: rtl;
+  text-align: left;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 24px);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.caption bdi { direction: ltr; unicode-bidi: isolate; }
+.caption.show { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pill, .rec, .dots i { transition: none; animation: none; }
+}

@@ -12,7 +12,7 @@ Project folder: `D:\Claude\saywell` (new git repo). The first step after approva
 ## Stack
 | Concern | Choice |
 |---|---|
-| App shell | Tauri v2. Rust backend, Svelte 5 + TypeScript + Vite frontend |
+| App shell | Tauri v2. Rust backend; (M3 decision) plain HTML/CSS/JS pages in `ui/`, no frontend build step or npm dependencies. Three small windows did not need a framework |
 | Audio capture | `cpal` (WASAPI), resampled to 16 kHz mono with `rubato` |
 | Speech-to-text | **(M0 decision)** sidecar `whisper-server.exe` built from whisper.cpp with `-DGGML_VULKAN=ON`, model kept warm, loopback HTTP. See docs/benchmarks.md |
 | LLM cleanup | `llama-server.exe` (official llama.cpp **win-vulkan-x64** release) as a Tauri sidecar, bound to `127.0.0.1` on a random port with a random API key, OpenAI-compatible `/v1/chat/completions` |

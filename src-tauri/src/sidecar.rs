@@ -77,6 +77,14 @@ impl Sidecar {
         bail!("{} did not become ready within {:?}", self.name, timeout)
     }
 
+    /// True if the process has exited (crashed or was stopped).
+    pub fn has_exited(&self) -> bool {
+        match self.child.lock().unwrap().as_mut() {
+            Some(c) => !matches!(c.try_wait(), Ok(None)),
+            None => true,
+        }
+    }
+
     pub fn stop(&self) {
         if let Some(mut c) = self.child.lock().unwrap().take() {
             let _ = c.kill();

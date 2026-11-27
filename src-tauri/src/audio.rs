@@ -6,6 +6,7 @@
 use std::io::Cursor;
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -24,31 +25,57 @@ impl Clip {
     pub fn duration_secs(&self) -> f32 {
         self.samples.len() as f32 / TARGET_RATE as f32
     }
+
+    /// (peak, rms) of the samples, for diagnostics.
+    pub fn levels(&self) -> (f32, f32) {
+        let peak = self.samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        let rms = (self.samples.iter().map(|s| s * s).sum::<f32>() / self.samples.len().max(1) as f32).sqrt();
+        (peak, rms)
+    }
 }
 
 enum Cmd {
-    Start,
+    /// Open the named microphone (or the default one) and start recording.
+    Start(Option<String>),
     Stop(Sender<Result<Clip>>),
+    /// Copy of the last `secs` seconds recorded so far (for the live preview).
+    Peek(f32, Sender<Option<Clip>>),
 }
 
 #[derive(Clone)]
 pub struct Recorder {
     tx: Sender<Cmd>,
+    level: Arc<AtomicU32>,
 }
 
 impl Recorder {
     /// Spawn the capture thread.
     pub fn spawn(max_secs: u32) -> Self {
         let (tx, rx) = mpsc::channel();
+        let level = Arc::new(AtomicU32::new(0));
+        let lv = level.clone();
         std::thread::Builder::new()
             .name("audio".into())
-            .spawn(move || audio_thread(rx, max_secs))
+            .spawn(move || audio_thread(rx, max_secs, lv))
             .expect("spawn audio thread");
-        Self { tx }
+        Self { tx, level }
     }
 
-    pub fn start(&self) {
-        let _ = self.tx.send(Cmd::Start);
+    pub fn start(&self, device: Option<String>) {
+        self.level.store(0, Ordering::Relaxed);
+        let _ = self.tx.send(Cmd::Start(device));
+    }
+
+    /// Recent input level (RMS of the last audio callback, full scale = 1.0).
+    pub fn level(&self) -> f32 {
+        f32::from_bits(self.level.load(Ordering::Relaxed))
+    }
+
+    /// The last `secs` seconds recorded so far, at 16 kHz; `None` if not recording.
+    pub fn peek(&self, secs: f32) -> Option<Clip> {
+        let (tx, rx) = mpsc::channel();
+        self.tx.send(Cmd::Peek(secs, tx)).ok()?;
+        rx.recv().ok().flatten()
     }
 
     /// Stop recording and return the captured clip (resampled to 16 kHz mono).
@@ -65,14 +92,14 @@ struct Active {
     rate: u32,
 }
 
-fn audio_thread(rx: Receiver<Cmd>, max_secs: u32) {
+fn audio_thread(rx: Receiver<Cmd>, max_secs: u32, level: Arc<AtomicU32>) {
     let mut active: Option<Active> = None;
     for cmd in rx {
         match cmd {
-            Cmd::Start => {
+            Cmd::Start(device) => {
                 active = None; // drop any previous stream first
                 let t0 = Instant::now();
-                match open_stream(max_secs) {
+                match open_stream(max_secs, device.as_deref(), level.clone()) {
                     Ok(a) => {
                         log::info!("mic open in {} ms at {} Hz", t0.elapsed().as_millis(), a.rate);
                         active = Some(a);
@@ -92,26 +119,60 @@ fn audio_thread(rx: Receiver<Cmd>, max_secs: u32) {
                 };
                 let _ = reply.send(res);
             }
+            Cmd::Peek(secs, reply) => {
+                let clip = active.as_ref().map(|a| {
+                    let buf = a.buf.lock().unwrap();
+                    let n = (secs * a.rate as f32) as usize;
+                    let tail = &buf[buf.len().saturating_sub(n)..];
+                    Clip { samples: resample_to_16k(tail, a.rate) }
+                });
+                let _ = reply.send(clip);
+            }
         }
     }
 }
 
-fn open_stream(max_secs: u32) -> Result<Active> {
+/// Names of the available microphones.
+pub fn input_devices() -> Vec<String> {
+    cpal::default_host()
+        .input_devices()
+        .map(|it| it.filter_map(|d| d.name().ok()).collect())
+        .unwrap_or_default()
+}
+
+fn open_stream(max_secs: u32, name: Option<&str>, level: Arc<AtomicU32>) -> Result<Active> {
     let host = cpal::default_host();
-    let device = host.default_input_device().context("no default microphone")?;
+    let named = name.and_then(|n| {
+        let found = host.input_devices().ok()?.find(|d| d.name().is_ok_and(|dn| dn == n));
+        if found.is_none() {
+            log::warn!("microphone '{n}' not found; using the Windows default");
+        }
+        found
+    });
+    let device = match named {
+        Some(d) => d,
+        None => host.default_input_device().context("no default microphone")?,
+    };
     let config = device.default_input_config().context("reading mic config")?;
     let rate = config.sample_rate().0;
     let channels = config.channels() as usize;
+    log::info!(
+        "mic '{}': {} ch, {} Hz, {:?}",
+        device.name().unwrap_or_else(|_| "?".into()),
+        channels,
+        rate,
+        config.sample_format()
+    );
     let cap = rate as usize * max_secs as usize;
     let buf = Arc::new(Mutex::new(Vec::<f32>::with_capacity(rate as usize * 30)));
     let stream_cfg: cpal::StreamConfig = config.clone().into();
     let err = |e| log::error!("mic stream error: {e}");
 
     let stream = match config.sample_format() {
-        cpal::SampleFormat::F32 => build::<f32>(&device, &stream_cfg, channels, cap, buf.clone(), err)?,
-        cpal::SampleFormat::I16 => build::<i16>(&device, &stream_cfg, channels, cap, buf.clone(), err)?,
-        cpal::SampleFormat::U16 => build::<u16>(&device, &stream_cfg, channels, cap, buf.clone(), err)?,
-        cpal::SampleFormat::I32 => build::<i32>(&device, &stream_cfg, channels, cap, buf.clone(), err)?,
+        cpal::SampleFormat::F32 => build::<f32>(&device, &stream_cfg, channels, cap, buf.clone(), level.clone(), err)?,
+        cpal::SampleFormat::I16 => build::<i16>(&device, &stream_cfg, channels, cap, buf.clone(), level.clone(), err)?,
+        cpal::SampleFormat::U16 => build::<u16>(&device, &stream_cfg, channels, cap, buf.clone(), level.clone(), err)?,
+        cpal::SampleFormat::I32 => build::<i32>(&device, &stream_cfg, channels, cap, buf.clone(), level.clone(), err)?,
         other => return Err(anyhow!("unsupported mic sample format {other:?}")),
     };
     stream.play()?;
@@ -124,6 +185,7 @@ fn build<T>(
     channels: usize,
     cap: usize,
     buf: Arc<Mutex<Vec<f32>>>,
+    level: Arc<AtomicU32>,
     err: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> Result<cpal::Stream>
 where
@@ -134,12 +196,18 @@ where
         cfg,
         move |data: &[T], _: &cpal::InputCallbackInfo| {
             let mut b = buf.lock().unwrap();
+            let (mut sq, mut n) = (0.0f32, 0usize);
             for frame in data.chunks(channels) {
-                if b.len() >= cap {
-                    return;
-                }
                 let sum: f32 = frame.iter().map(|s| s.to_sample::<f32>()).sum();
-                b.push(sum / channels as f32);
+                let v = sum / channels as f32;
+                sq += v * v;
+                n += 1;
+                if b.len() < cap {
+                    b.push(v);
+                }
+            }
+            if n > 0 {
+                level.store((sq / n as f32).sqrt().to_bits(), Ordering::Relaxed);
             }
         },
         err,

@@ -15,8 +15,20 @@ pub struct Settings {
     pub whisper_model: String,
     /// Push-to-talk key, as a Windows virtual-key code. Default: Right Ctrl (0xA3).
     pub hotkey_vk: u32,
+    /// Display name of the hotkey ("Right Ctrl").
+    pub hotkey_label: String,
+    /// Double-tap the hotkey to keep recording hands-free until the next tap.
+    pub double_tap_hands_free: bool,
+    /// Show a caption of the words above the bar while speaking (transcribes about once a second).
+    pub preview_caption: bool,
+    /// Microphone name; `None` means the Windows default input device.
+    pub mic_device: Option<String>,
     /// Recordings are cut off after this many seconds.
     pub max_record_secs: u32,
+    /// Run the local LLM over each transcript (fillers, self-corrections, punctuation).
+    pub cleanup_enabled: bool,
+    /// Cleanup LLM file name (GGUF) inside `models_dir`.
+    pub llm_model: String,
 }
 
 impl Default for Settings {
@@ -25,22 +37,36 @@ impl Default for Settings {
             models_dir: data_dir().join("models"),
             whisper_model: "ggml-large-v3-turbo-q5_0.bin".into(),
             hotkey_vk: 0xA3,
+            hotkey_label: "Right Ctrl".into(),
+            double_tap_hands_free: true,
+            preview_caption: false,
+            mic_device: None,
             max_record_secs: 360,
+            cleanup_enabled: true,
+            llm_model: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf".into(),
         }
     }
 }
 
 impl Settings {
-    /// Path of the Whisper model. Looks in `models_dir` first; debug builds also fall back to the
-    /// repo's git-ignored `models/` folder so a fresh dev checkout works without editing settings.
     pub fn whisper_model_path(&self) -> PathBuf {
-        let primary = self.models_dir.join(&self.whisper_model);
+        self.model_path(&self.whisper_model)
+    }
+
+    pub fn llm_model_path(&self) -> PathBuf {
+        self.model_path(&self.llm_model)
+    }
+
+    /// Path of a model file. Looks in `models_dir` first; debug builds also fall back to the
+    /// repo's git-ignored `models/` folder so a fresh dev checkout works without editing settings.
+    fn model_path(&self, file: &str) -> PathBuf {
+        let primary = self.models_dir.join(file);
         if primary.exists() {
             return primary;
         }
         #[cfg(debug_assertions)]
         {
-            let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("../models").join(&self.whisper_model);
+            let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("../models").join(file);
             if dev.exists() {
                 log::info!("model not in {}; using dev copy {}", self.models_dir.display(), dev.display());
                 return dev;
