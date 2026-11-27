@@ -10,6 +10,13 @@ use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewU
 use crate::store::{HistoryEntry, Rule, Term};
 use crate::{audio, hotkey, insert, models, settings, settings_snapshot, winsys, SETTINGS, STORE};
 
+/// WebView2 (Edge) switches for Saywell's windows. The pages are bundled and need no network, so:
+/// turn off Edge's background services (component updates, telemetry, sync, safe-browsing pings),
+/// and as a backstop send any request to a dead local proxy and fail every DNS lookup.
+/// The first `--disable-features` list keeps Tauri's defaults (no mini menu, no SmartScreen).
+/// All windows must use identical arguments (they share one browser process).
+const WEBVIEW_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,OptimizationHints,Translate,AutofillServerCommunication,MediaRouter,msEdgeShopping,msEdgeCollections --disable-background-networking --disable-component-update --disable-domain-reliability --disable-sync --disable-client-side-phishing-detection --no-pings --disable-breakpad --metrics-recording-only --no-first-run --proxy-server=127.0.0.1:9 --proxy-bypass-list=<-loopback> --host-resolver-rules=\"MAP * ~NOTFOUND\"";
+
 const OVERLAY_W: f64 = 480.0;
 const OVERLAY_H: f64 = 116.0;
 /// Bumped on every overlay change, so a delayed "hide" never hides a newer state.
@@ -35,6 +42,7 @@ pub fn create_overlay(app: &AppHandle) -> tauri::Result<()> {
         .focused(false)
         .focusable(false)
         .visible(false)
+        .additional_browser_args(WEBVIEW_ARGS)
         .build()?;
     win.set_ignore_cursor_events(true)?;
     if let Ok(h) = win.hwnd() {
@@ -88,11 +96,20 @@ pub fn overlay_preview(app: &AppHandle, text: &str) {
 
 /// Show a short message, then hide (unless something newer was shown meanwhile).
 pub fn overlay_error(app: &AppHandle, msg: &str) {
-    overlay(app, "error", msg);
+    overlay_message(app, "error", msg, 2500);
+}
+
+/// Like [`overlay_error`] but neutral (amber), for things like "text copied".
+pub fn overlay_notice(app: &AppHandle, msg: &str) {
+    overlay_message(app, "notice", msg, 4000);
+}
+
+fn overlay_message(app: &AppHandle, state: &str, msg: &str, ms: u64) {
+    overlay(app, state, msg);
     let gen = OVERLAY_GEN.load(Ordering::SeqCst);
     let app = app.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(2500));
+        std::thread::sleep(Duration::from_millis(ms));
         if OVERLAY_GEN.load(Ordering::SeqCst) == gen {
             overlay(&app, "hidden", "");
         }
@@ -111,6 +128,7 @@ fn open_window(app: &AppHandle, label: &str, page: &str, title: &str, w: f64, h:
         .inner_size(w, h)
         .min_inner_size(w * 0.8, h * 0.8)
         .center()
+        .additional_browser_args(WEBVIEW_ARGS)
         .build();
     if let Err(e) = res {
         log::error!("could not open {label} window: {e}");
@@ -142,6 +160,7 @@ pub struct SettingsView {
     start_with_windows: bool,
     history_enabled: bool,
     history_days: u32,
+    insert_methods: std::collections::BTreeMap<String, String>,
     mics: Vec<String>,
     models_dir: String,
     version: &'static str,
@@ -161,6 +180,7 @@ pub fn get_settings() -> SettingsView {
         start_with_windows: winsys::autostart_enabled(),
         history_enabled: s.history_enabled,
         history_days: s.history_days,
+        insert_methods: s.insert_methods,
         mics: audio::input_devices(),
         models_dir: s.models_dir.display().to_string(),
         version: env!("CARGO_PKG_VERSION"),
@@ -179,6 +199,8 @@ pub struct SettingsPatch {
     start_with_windows: Option<bool>,
     history_enabled: Option<bool>,
     history_days: Option<u32>,
+    /// Set one app's method: (program name, "type" | "paste" | "" to remove).
+    insert_method: Option<(String, String)>,
 }
 
 /// Apply and save the given changes; returns the new settings.
@@ -209,6 +231,21 @@ pub fn update_settings(app: AppHandle, patch: SettingsPatch) -> Result<SettingsV
         }
         if let Some(m) = patch.mic_device {
             s.mic_device = (!m.is_empty()).then_some(m);
+        }
+        if let Some((app_name, method)) = patch.insert_method {
+            let key = app_name.trim().trim_end_matches(".exe").trim_end_matches(".EXE").to_lowercase();
+            if key.is_empty() || key.len() > 64 || key.contains(['/', '\\', ':']) {
+                return Err("Use the program's name, like \"putty\" or \"mstsc\".".into());
+            }
+            match method.as_str() {
+                "" | "paste" => {
+                    s.insert_methods.remove(&key);
+                }
+                "type" => {
+                    s.insert_methods.insert(key, method);
+                }
+                _ => return Err("Unknown insert method.".into()),
+            }
         }
         if let Some(v) = patch.history_enabled {
             s.history_enabled = v;
@@ -352,6 +389,27 @@ pub fn finish_setup(app: AppHandle, cleanup: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Point Saywell at a folder that already holds the model files (no download needed).
+#[tauri::command]
+pub fn use_models_dir(path: String) -> Result<SetupStatus, String> {
+    let dir = std::path::PathBuf::from(path.trim().trim_matches('"'));
+    if !dir.is_dir() {
+        return Err("That folder doesn't exist.".into());
+    }
+    let found = models::present_in(&dir);
+    if !found.contains(&"speech") {
+        return Err(format!("No speech model ({}) of the right size in that folder.", models::WHISPER.file));
+    }
+    let guard = SETTINGS.get().ok_or("settings not loaded")?;
+    {
+        let mut s = guard.lock().unwrap();
+        s.models_dir = dir;
+        s.save(&settings::settings_path()).map_err(|e| format!("Couldn't save settings: {e:#}"))?;
+    }
+    log::info!("models folder set to {}", settings_snapshot().models_dir.display());
+    Ok(setup_status())
+}
+
 #[tauri::command]
 pub fn close_setup(app: AppHandle) {
     if let Some(w) = app.get_webview_window("onboarding") {
@@ -399,7 +457,7 @@ pub fn history_clear(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn history_copy(id: i64) -> Result<(), String> {
     let text = store()?.history_text(id).map_err(|e| e.to_string())?.ok_or("That entry no longer exists.")?;
-    arboard::Clipboard::new().and_then(|mut c| c.set_text(text)).map_err(|e| e.to_string())
+    insert::copy_for_user(&text).map_err(|e| format!("{e:#}"))
 }
 
 /// Paste an entry into the app you were using: hide the history window, let focus return, paste.

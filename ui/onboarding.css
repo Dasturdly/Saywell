@@ -54,6 +54,14 @@ h1 .soft { color: var(--amber); }
 .manual summary { cursor: pointer; width: max-content; }
 .manual summary:hover { color: var(--text); }
 .manual p { margin: 10px 0; }
+.folder { display: flex; gap: 8px; }
+.folder input {
+  flex: 1; min-width: 0;
+  font: 13px var(--mono); color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 11px;
+  user-select: text;
+}
+.folder input:focus { outline: none; border-color: var(--amber); box-shadow: 0 0 0 3px var(--amber-glow); }
 
 .keycap.small { min-width: 0; padding: 4px 9px; font-size: 12px; vertical-align: 1px; }
 

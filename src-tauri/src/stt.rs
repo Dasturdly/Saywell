@@ -31,7 +31,7 @@ impl Stt {
         let server = Sidecar::start("whisper-server", &exe, &args, &log_dir.join("whisper-server.log"))?;
         let took = server.wait_ready("/", Duration::from_secs(90))?;
         log::info!("whisper-server ready in {} ms", took.as_millis());
-        let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(120)).build()?;
+        let client = crate::sidecar::loopback_client(Duration::from_secs(120))?;
         let stt = Self { server, client };
         // Warm-up so the first real dictation doesn't pay shader/graph setup cost.
         let _ = stt.transcribe(&Clip { samples: vec![0.0; 16_000] });

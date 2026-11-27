@@ -64,6 +64,58 @@ pub fn foreground_app() -> String {
     }
 }
 
+/// Integrity level (e.g. 0x2000 medium, 0x3000 high/admin) of a process token, if readable.
+unsafe fn token_integrity(token: windows::Win32::Foundation::HANDLE) -> Option<u32> {
+    use windows::Win32::Security::{
+        GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TokenIntegrityLevel, TOKEN_MANDATORY_LABEL,
+    };
+    let mut buf = vec![0u8; 256];
+    let mut len = 0u32;
+    GetTokenInformation(token, TokenIntegrityLevel, Some(buf.as_mut_ptr().cast()), buf.len() as u32, &mut len).ok()?;
+    let label = &*(buf.as_ptr() as *const TOKEN_MANDATORY_LABEL);
+    let sid = label.Label.Sid;
+    let count = *GetSidSubAuthorityCount(sid);
+    Some(*GetSidSubAuthority(sid, u32::from(count) - 1))
+}
+
+unsafe fn process_integrity(process: windows::Win32::Foundation::HANDLE) -> Option<u32> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::Security::TOKEN_QUERY;
+    use windows::Win32::System::Threading::OpenProcessToken;
+    let mut token = windows::Win32::Foundation::HANDLE::default();
+    OpenProcessToken(process, TOKEN_QUERY, &mut token).ok()?;
+    let level = token_integrity(token);
+    let _ = CloseHandle(token);
+    level
+}
+
+/// True if the foreground window runs with higher rights than Saywell (e.g. "Run as
+/// administrator"). Windows blocks pasting and typing into such windows from normal apps.
+pub fn foreground_is_elevated() -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    let pid = foreground_pid();
+    if pid == 0 || pid == std::process::id() {
+        return false;
+    }
+    unsafe {
+        let ours = process_integrity(GetCurrentProcess()).unwrap_or(0x2000);
+        let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
+        let theirs = process_integrity(h);
+        let _ = CloseHandle(h);
+        match theirs {
+            Some(level) => level > ours,
+            // Can't read its token at all: it is protected or runs as a different (admin) user.
+            None => true,
+        }
+    }
+}
+
+/// Integrity level of Saywell itself (diagnostics and tests).
+pub fn own_integrity() -> u32 {
+    unsafe { process_integrity(windows::Win32::System::Threading::GetCurrentProcess()).unwrap_or(0) }
+}
+
 /// True if the foreground window belongs to Saywell itself (settings or setup window).
 pub fn foreground_is_ours() -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
@@ -188,6 +240,15 @@ mod tests {
         set_string(&key, "v", None).unwrap(); // deleting twice is fine
         unsafe {
             let _ = windows::Win32::System::Registry::RegDeleteKeyW(HKEY_CURRENT_USER, &HSTRING::from(key.as_str()));
+        }
+    }
+
+    #[test]
+    fn own_process_is_not_elevated_relative_to_itself() {
+        assert!(own_integrity() >= 0x1000, "integrity 0x{:X}", own_integrity());
+        unsafe {
+            let level = process_integrity(windows::Win32::System::Threading::GetCurrentProcess());
+            assert_eq!(level, Some(own_integrity()));
         }
     }
 

@@ -218,7 +218,8 @@ impl Controller {
         let (app, busy) = (self.app.clone(), self.busy.clone());
         std::thread::spawn(move || {
             match process(&app, &clip, released) {
-                Ok(()) => ui::overlay(&app, "hidden", ""),
+                Ok(None) => ui::overlay(&app, "hidden", ""),
+                Ok(Some(notice)) => ui::overlay_notice(&app, &notice),
                 Err(msg) => ui::overlay_error(&app, &msg),
             }
             busy.store(false, Ordering::SeqCst);
@@ -226,11 +227,12 @@ impl Controller {
     }
 }
 
-/// Transcribe, clean up and paste. `Err` carries a short message for the overlay.
-fn process(app: &AppHandle, clip: &Clip, released: Instant) -> Result<(), String> {
+/// Transcribe, clean up and insert. `Ok(Some(..))` is a notice for the overlay (e.g. "copied"),
+/// `Err` a short error message.
+fn process(app: &AppHandle, clip: &Clip, released: Instant) -> Result<Option<String>, String> {
     if let Some(reason) = postprocess::skip_reason(clip) {
         log::info!("skipped clip: {reason}");
-        return if reason == "silence" { Err("Didn't hear anything. Check your microphone.".into()) } else { Ok(()) };
+        return if reason == "silence" { Err("Didn't hear anything. Check your microphone.".into()) } else { Ok(None) };
     }
     let Some(stt) = STT.get() else {
         log::warn!("speech model still loading; dictation dropped");
@@ -272,21 +274,41 @@ fn process(app: &AppHandle, clip: &Clip, released: Instant) -> Result<(), String
     let text = dictionary::apply_rules(&cleaned.text, &rules);
     crate::debug_capture(clip, &raw, &text);
     if text.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     let t_ins = Instant::now();
     log::debug!("inserting into foreground pid {}", crate::winsys::foreground_pid());
     let target_app = crate::winsys::foreground_app();
-    if crate::winsys::foreground_is_ours() {
+    let mut notice = None;
+    let method = if crate::winsys::foreground_is_ours() {
         ui::insert_into_own_window(app, &text);
-    } else {
-        insert::paste(&text).map_err(|e| {
-            log::error!("insert failed: {e:#}");
-            "Couldn't paste here. The text is not on your clipboard.".to_string()
+        "own-window"
+    } else if crate::winsys::foreground_is_elevated() {
+        // Windows doesn't let normal apps type into admin windows: hand the text over instead.
+        insert::copy_for_user(&text).map_err(|e| {
+            log::error!("copy failed: {e:#}");
+            "This window runs as administrator and the text couldn't be copied.".to_string()
         })?;
-    }
+        notice = Some("Admin window: text copied. Press Ctrl+V to paste.".to_string());
+        "copied (admin window)"
+    } else {
+        let wanted = settings_snapshot()
+            .insert_methods
+            .get(&target_app.to_lowercase())
+            .map(|m| insert::Method::from_setting(m))
+            .unwrap_or(insert::Method::Paste);
+        match insert::insert(&text, wanted) {
+            Ok(insert::Method::Paste) => "paste",
+            Ok(insert::Method::Type) => "type",
+            Err(e) => {
+                log::error!("insert failed: {e:#}");
+                let _ = insert::copy_for_user(&text);
+                return Err("Couldn't type here, so the text is on your clipboard.".into());
+            }
+        }
+    };
     log::info!(
-        "dictation: audio={:.2}s stt={}ms cleanup={}ms ({source}) insert={}ms release_to_text={}ms chars={}",
+        "dictation: audio={:.2}s stt={}ms cleanup={}ms ({source}) insert={}ms ({method}) release_to_text={}ms chars={}",
         clip.duration_secs(),
         stt_ms,
         llm_ms,
@@ -295,7 +317,7 @@ fn process(app: &AppHandle, clip: &Clip, released: Instant) -> Result<(), String
         text.chars().count()
     );
     save_history(app, &target_app, &transcript, &text, clip, released);
-    Ok(())
+    Ok(notice)
 }
 
 fn dictionary_terms() -> Vec<String> {

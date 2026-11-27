@@ -44,9 +44,9 @@ listen("overlay", ({ payload }) => {
   const { state, text } = payload;
   const wasLive = live();
   pill.dataset.state = state;
-  msg.textContent = state === "error" ? text : "";
+  msg.textContent = state === "error" || state === "notice" ? text : "";
   // Keep the caption while the final text is written, so you can see where you stopped.
-  if (state === "hidden" || state === "error") setCaption("");
+  if (state === "hidden" || state === "error" || state === "notice") setCaption("");
   if (live() && !wasLive) {
     history.fill(0);
     smooth = 0;

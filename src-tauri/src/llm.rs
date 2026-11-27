@@ -31,7 +31,7 @@ impl Llm {
         if !model.exists() {
             bail!("LLM model not found at {}", model.display());
         }
-        let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(60)).build()?;
+        let client = crate::sidecar::loopback_client(Duration::from_secs(60))?;
         let llm = Arc::new(Self {
             model: model.to_path_buf(),
             log_dir: log_dir.to_path_buf(),

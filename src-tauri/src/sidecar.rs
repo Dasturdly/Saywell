@@ -63,7 +63,7 @@ impl Sidecar {
     /// Poll `path` until it answers 2xx, the process exits, or `timeout` passes.
     pub fn wait_ready(&self, path: &str, timeout: Duration) -> Result<Duration> {
         let t0 = Instant::now();
-        let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(2)).build()?;
+        let client = loopback_client(Duration::from_secs(2))?;
         let url = format!("{}{}", self.base_url(), path);
         while t0.elapsed() < timeout {
             if let Some(status) = self.child.lock().unwrap().as_mut().and_then(|c| c.try_wait().ok().flatten()) {
@@ -98,6 +98,12 @@ impl Drop for Sidecar {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+/// HTTP client for talking to the local helper servers: no proxy, so requests to 127.0.0.1 can
+/// never be sent to (or logged by) a proxy configured on the system.
+pub fn loopback_client(timeout: Duration) -> Result<reqwest::blocking::Client> {
+    Ok(reqwest::blocking::Client::builder().no_proxy().timeout(timeout).build()?)
 }
 
 fn free_port() -> Result<u16> {

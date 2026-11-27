@@ -95,6 +95,11 @@ html, body.overlay {
 .pill[data-state="error"] .wave { display: none; }
 .pill[data-state="error"] .msg { display: block; }
 
+/* Notice (e.g. "text copied"): calm amber instead of error red. */
+.pill[data-state="notice"] { --w: auto; border-color: rgba(242, 165, 65, 0.55); }
+.pill[data-state="notice"] .wave { display: none; }
+.pill[data-state="notice"] .msg { display: block; color: #f6dcb4; }
+
 /* Caption of the words so far (Settings → "Show words while speaking"): the last two lines. */
 .caption {
   max-width: 460px;

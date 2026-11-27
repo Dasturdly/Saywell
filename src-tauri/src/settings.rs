@@ -1,6 +1,7 @@
 //! User settings stored as TOML in `%APPDATA%\Saywell\settings.toml`.
 //! M1 keeps this minimal; M3 adds the settings UI.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -25,6 +26,9 @@ pub struct Settings {
     pub history_enabled: bool,
     /// Delete history older than this many days; 0 keeps it forever.
     pub history_days: u32,
+    /// Per-app insert method: program name (lower case, no .exe) -> "type" or "paste".
+    /// Typing is for apps where pasting doesn't work (some terminals, remote desktops, games).
+    pub insert_methods: BTreeMap<String, String>,
     /// Microphone name; `None` means the Windows default input device.
     pub mic_device: Option<String>,
     /// Recordings are cut off after this many seconds.
@@ -47,6 +51,7 @@ impl Default for Settings {
             history_enabled: true,
             history_days: 30,
             mic_device: None,
+            insert_methods: BTreeMap::new(),
             max_record_secs: 360,
             cleanup_enabled: true,
             llm_model: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf".into(),

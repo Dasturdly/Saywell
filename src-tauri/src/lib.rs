@@ -5,6 +5,7 @@
 
 pub mod audio;
 pub mod cleanup;
+pub mod clipboard;
 pub mod controller;
 pub mod dictionary;
 pub mod hotkey;
@@ -205,6 +206,7 @@ fn run_app(settings: Settings, cli: Cli) {
             ui::dict_set_rule,
             ui::dict_remove_rule,
             ui::open_history,
+            ui::use_models_dir,
         ])
         .setup(move |app| {
             let handle = app.handle();

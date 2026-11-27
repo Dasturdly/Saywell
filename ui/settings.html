@@ -47,6 +47,18 @@
           </div>
           <select id="mic" aria-label="Microphone"></select>
         </div>
+        <div class="row column">
+          <div>
+            <div class="label">Type instead of paste</div>
+            <div class="desc">Saywell pastes text through the clipboard (and then puts your clipboard back). For apps where pasting doesn't work, like some terminals or remote desktops, it can type the text instead. Use the program's name; the History window shows it for each dictation.</div>
+          </div>
+          <form class="adder" id="app-form">
+            <input id="app-name" type="text" placeholder="Program name, e.g. putty" aria-label="Program name" autocomplete="off" spellcheck="false" maxlength="64">
+            <button type="submit">Add</button>
+          </form>
+          <ul class="chips" id="type-apps"></ul>
+          <div class="error" id="app-error" role="alert"></div>
+        </div>
         <div class="row">
           <div>
             <div class="label">Clean up text with local AI</div>

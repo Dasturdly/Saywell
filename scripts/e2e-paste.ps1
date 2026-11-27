@@ -17,7 +17,11 @@ param(
   [string]$Terms = '',
   [string]$Rule = '',
   # Expected text, if different from the clip's reference (e.g. after a replacement rule).
-  [string]$Expect = ''
+  [string]$Expect = '',
+  # Insert method for the test window's program: 'paste' (default) or 'type'.
+  [ValidateSet('paste', 'type')][string]$Method = 'paste',
+  # Put an image (not text) on the clipboard first and check it survives the dictation.
+  [switch]$ImageClipboard
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms
@@ -42,7 +46,8 @@ $expected = (Get-Content (Join-Path $root "tests\fixtures\audio\$Clip.txt") -Raw
 # Throwaway profile: F24 hotkey, separate settings and log.
 $env:APPDATA = Join-Path $env:TEMP "saywell-e2e-profile-$PID"
 New-Item -ItemType Directory -Force (Join-Path $env:APPDATA 'Saywell') | Out-Null
-Set-Content (Join-Path $env:APPDATA 'Saywell\settings.toml') "hotkey_vk = 135`nhotkey_label = `"F24`"`npreview_caption = $(if ($Caption) { 'true' } else { 'false' })`n"
+Set-Content (Join-Path $env:APPDATA 'Saywell\settings.toml') ("hotkey_vk = 135`nhotkey_label = `"F24`"`npreview_caption = $(if ($Caption) { 'true' } else { 'false' })`n" +
+  $(if ($Method -eq 'type') { "[insert_methods]`npowershell = `"type`"`n" } else { '' }))
 $log = Join-Path $env:APPDATA 'Saywell\logs\saywell.log'
 $db = Join-Path $env:APPDATA 'Saywell\saywell.db'
 $dbTool = Join-Path $PSScriptRoot 'e2e_db.py'
@@ -63,7 +68,17 @@ Add-Type -AssemblyName System.Windows.Forms
 `$f.StartPosition = 'CenterScreen'; `$f.Add_Shown({ `$f.WindowState = 'Normal'; `$f.Activate(); `$t.Focus() }); [Windows.Forms.Application]::Run(`$f)
 "@
 
-[System.Windows.Forms.Clipboard]::SetText('SAYWELL-SENTINEL')
+# Keep the user's clipboard (text or image) and put it back at the end.
+$userText = [System.Windows.Forms.Clipboard]::GetText()
+$userImage = if ([System.Windows.Forms.Clipboard]::ContainsImage()) { [System.Windows.Forms.Clipboard]::GetImage() } else { $null }
+if ($ImageClipboard) {
+  Add-Type -AssemblyName System.Drawing
+  $testImage = New-Object Drawing.Bitmap 37, 23
+  $g = [Drawing.Graphics]::FromImage($testImage); $g.Clear([Drawing.Color]::FromArgb(242, 165, 65)); $g.Dispose()
+  [System.Windows.Forms.Clipboard]::SetImage($testImage)
+} else {
+  [System.Windows.Forms.Clipboard]::SetText('SAYWELL-SENTINEL')
+}
 $app = Start-Process -FilePath $Exe -ArgumentList '--inject-wav', "`"$wav`"" -PassThru
 $target = $null
 try {
@@ -131,7 +146,10 @@ try {
   if ($Shot) { "target pid $($target.Id); $(([regex]::Matches($new, 'inserting into foreground pid \d+') | Select-Object -Last 1).Value)" }
   $norm = { param($s) ($s.ToLower() -replace '[^a-z0-9 ]', '' -replace '\s+', ' ').Trim() }
   $ok = $got.Length -gt 0 -and ((& $norm $got) -eq (& $norm $expected) -or $got.Length -ge 0.8 * $expected.Length)
-  if ($clipNow -ne 'SAYWELL-SENTINEL') { 'FAIL: clipboard was not restored'; $ok = $false }
+  if ($ImageClipboard) {
+    $img = [System.Windows.Forms.Clipboard]::GetImage()
+    if (-not $img -or $img.Width -ne 37 -or $img.Height -ne 23) { 'FAIL: the image on the clipboard was not restored'; $ok = $false } else { 'clipboard: image restored (37x23)' }
+  } elseif ($clipNow -ne 'SAYWELL-SENTINEL') { 'FAIL: clipboard was not restored'; $ok = $false }
   if (Test-Path $db) { python -I $dbTool history $db }
   $previews = [regex]::Matches($new, 'preview: ').Count
   $handsFree = $new -match 'hands-free recording'
@@ -140,6 +158,9 @@ try {
   if ($ok) { 'E2E PASS' } else { 'E2E FAIL'; exit 1 }
 }
 finally {
+  if ($userImage) { [System.Windows.Forms.Clipboard]::SetImage($userImage) }
+  elseif ($userText) { [System.Windows.Forms.Clipboard]::SetText($userText) }
+  else { [System.Windows.Forms.Clipboard]::Clear() }
   if ($app -and -not $app.HasExited) { Stop-Process -Id $app.Id -ErrorAction SilentlyContinue }
   if ($target -and -not $target.HasExited) { Stop-Process -Id $target.Id -ErrorAction SilentlyContinue; $target.WaitForExit(3000) | Out-Null }
   Remove-Item $outFile -ErrorAction SilentlyContinue

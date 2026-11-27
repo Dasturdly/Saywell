@@ -11,6 +11,7 @@ function render(s) {
   $("key-desc").textContent = `Hold ${s.hotkey_label}, speak, let go. The text is typed where your cursor is.`;
   for (const k of ["double_tap_hands_free", "cleanup_enabled", "preview_caption", "start_with_windows", "history_enabled"]) $(k).checked = s[k];
   $("history_days").value = String(s.history_days);
+  renderTypeApps(s.insert_methods || {});
   const mic = $("mic");
   mic.replaceChildren();
   const def = new Option("Windows default", "");
@@ -44,6 +45,28 @@ for (const k of ["double_tap_hands_free", "cleanup_enabled", "preview_caption", 
 $("mic").addEventListener("change", (e) => save({ mic_device: e.target.value }));
 $("history_days").addEventListener("change", (e) => save({ history_days: Number(e.target.value) }));
 $("open-history").addEventListener("click", () => invoke("open_history"));
+
+// ---- per-app typing ----
+function renderTypeApps(methods) {
+  $("type-apps").replaceChildren(...Object.entries(methods).filter(([, m]) => m === "type").map(([name]) => {
+    const li = el("li", "", name);
+    li.appendChild(removeButton(`Paste again in ${name}`, () => save({ insert_method: [name, ""] })));
+    return li;
+  }));
+}
+
+$("app-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = $("app-name").value.trim();
+  if (!name) return;
+  try {
+    render(await invoke("update_settings", { patch: { insert_method: [name, "type"] } }));
+    $("app-name").value = "";
+    $("app-error").textContent = "";
+  } catch (err) {
+    $("app-error").textContent = String(err);
+  }
+});
 
 // ---- dictionary ----
 function el(tag, className, text) {

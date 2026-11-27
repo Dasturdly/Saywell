@@ -68,3 +68,13 @@ The guardrails reject output that is empty, a reply ("Sure…", "Here's…"), ou
 | history | SQLite in `%APPDATA%\Saywell\saywell.db`: text, raw text, target app, audio length, latency. Search, copy, paste again, delete, clear all (VACUUMs the file). Pruned to 30 days by default; can be paused |
 | paste reliability | Ctrl+V was sent 20 ms after setting the clipboard; clipboard watchers (e.g. Windows clipboard history) can still be reading then, and some apps silently paste nothing. 20 ms: about 1 in 3 E2E runs failed; 80 ms: 12 of 12 passed |
 | caption | on by default: the last two lines of your words above the bar, kept while the final text is written; elapsed-time counter in the bar |
+
+## M5 results: hardening, installer, offline audit
+| | result |
+|---|---|
+| clipboard | every memory-based format is saved and restored (images, files, rich text); the temporary dictation text is marked so Windows clipboard history and cloud clipboard don't keep it. If the clipboard is too large to save (> 64 MB) or busy, Saywell types the text instead of pasting. E2E: an image on the clipboard survives a dictation |
+| typing mode | per-app "type instead of paste" (Unicode keystrokes). E2E: 94 ms to insert vs ~240 ms for paste |
+| admin windows | detected by integrity level; the text is copied and the bar says "Admin window: text copied. Press Ctrl+V". Unit-tested; not tried against a real admin window |
+| loopback clients | connections to whisper-server and llama-server ignore any system proxy |
+| installer | `Saywell_0.1.0_x64-setup.exe`, 22.9 MB, per-user (no admin), helper binaries trimmed (llama 107 → 90 MB), models not bundled |
+| offline audit (`scripts/offline-audit.ps1`) | during start-up and a dictation, Saywell, whisper-server, llama-server and the WebView2 page/network processes had **loopback-only** endpoints. The WebView2 *runtime* process (a Windows component shared by all WebView2 apps) still opened a TLS connection to a Microsoft address (40.99.x). It is outside Chromium's network stack, so browser switches don't stop it; Saywell's pages cannot reach the network (CSP, dead proxy, DNS blackhole) and no audio or text passes through that process |

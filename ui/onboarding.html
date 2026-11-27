@@ -30,7 +30,12 @@
       <div class="error" id="dl-error" role="alert"></div>
       <details class="manual rise">
         <summary>I already have the files</summary>
-        <p class="note">Copy them into <span class="path" id="models_dir"></span> and click <em>Check again</em>.</p>
+        <p class="note">Point Saywell at the folder that holds them:</p>
+        <form class="folder" id="folder-form">
+          <input id="folder" type="text" placeholder="e.g. D:\models" aria-label="Folder with the model files" autocomplete="off" spellcheck="false">
+          <button type="submit">Use this folder</button>
+        </form>
+        <p class="note">Or copy them into <span class="path" id="models_dir"></span> and click <em>Check again</em>.</p>
         <div class="buttons"><button id="open-dir">Open folder</button><button id="recheck">Check again</button></div>
       </details>
     </section>

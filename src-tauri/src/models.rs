@@ -141,6 +141,16 @@ pub fn download(
     Ok(dest)
 }
 
+/// Which catalogue models are present in `dir` with the right size (a quick check; downloads
+/// are hash-verified, and a damaged file shows up as a load error later).
+pub fn present_in(dir: &Path) -> Vec<&'static str> {
+    catalogue()
+        .iter()
+        .filter(|m| std::fs::metadata(dir.join(m.file)).is_ok_and(|md| md.len() == m.size))
+        .map(|m| m.id)
+        .collect()
+}
+
 /// Hash an existing file and compare with the catalogue (used for "I already have the file").
 pub fn verify_file(spec: &ModelSpec, path: &Path) -> Result<()> {
     let mut f = File::open(path)?;

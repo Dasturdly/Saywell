@@ -96,6 +96,16 @@ listen("download", async ({ payload: d }) => {
 });
 
 $("open-dir").addEventListener("click", () => invoke("open_models_dir"));
+$("folder-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("dl-error").textContent = "";
+  try {
+    status = await invoke("use_models_dir", { path: $("folder").value });
+    render();
+  } catch (err) {
+    $("dl-error").textContent = String(err);
+  }
+});
 $("recheck").addEventListener("click", async () => {
   status = await invoke("setup_status");
   render();
