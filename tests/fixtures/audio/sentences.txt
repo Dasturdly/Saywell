@@ -1,0 +1,20 @@
+tts01|The quarterly report is due on Friday afternoon.
+tts02|Please send the updated invoice to the finance team by noon.
+tts03|I think we should move the meeting to Thursday at three o'clock.
+tts04|Can you pick up milk, eggs, and bread on the way home?
+tts05|The new feature reduces startup time by about forty percent.
+tts06|Remember to back up the database before running the migration.
+tts07|She said the train was delayed because of heavy snow near the station.
+tts08|Let's schedule a quick call tomorrow morning to review the design.
+tts09|The weather forecast says it will be sunny with a light breeze.
+tts10|Our team shipped the release candidate late last night.
+tts11|Please double check the spelling of the customer's name in the contract.
+tts12|I'm running about ten minutes late, so start without me.
+tts13|The museum is open every day except Monday from nine to five.
+tts14|We need to order more paper for the printer on the second floor.
+tts15|Thanks for your help with the presentation, it went really well.
+tts16|The recipe calls for two cups of flour and a pinch of salt.
+tts17|Make sure the server logs are rotated every seven days.
+tts18|He finally finished reading the novel after three long weeks.
+tts19|Could you share the slides from yesterday's workshop with everyone?
+tts20|The flight to Chicago leaves at six fifteen in the evening.

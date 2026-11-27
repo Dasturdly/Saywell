@@ -1,0 +1,1 @@
+﻿Make sure the server logs are rotated every seven days.
