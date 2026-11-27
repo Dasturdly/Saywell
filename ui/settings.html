@@ -57,9 +57,62 @@
         <div class="row">
           <div>
             <div class="label">Show words while speaking</div>
-            <div class="desc">A rough caption above the floating bar. The final text is worked out again when you finish.</div>
+            <div class="desc">Your latest words above the floating bar, so you can see how far you got. The final text is worked out again when you finish.</div>
           </div>
           <label class="switch"><input type="checkbox" id="preview_caption" aria-label="Show words while speaking"></label>
+        </div>
+      </div>
+    </section>
+
+    <section class="rise">
+      <div class="eyebrow">Dictionary</div>
+      <div class="card">
+        <div class="label">Words and names</div>
+        <div class="desc">Names, brands and jargon Saywell should spell your way, like <i>Anneliese</i> or <i>Kubernetes</i>.</div>
+        <form class="adder" id="term-form">
+          <input id="term" type="text" placeholder="Add a word or name" aria-label="Add a word or name" autocomplete="off" spellcheck="false" maxlength="60">
+          <button type="submit">Add</button>
+        </form>
+        <ul class="chips" id="terms"></ul>
+
+        <div class="label sub">Replacements</div>
+        <div class="desc">When you say a phrase, type something else instead. Handy for addresses, links and sign-offs.</div>
+        <form class="adder rule" id="rule-form">
+          <input id="find" type="text" placeholder="When I say..." aria-label="When I say" autocomplete="off" spellcheck="false">
+          <span class="arrow" aria-hidden="true">&rarr;</span>
+          <input id="replace" type="text" placeholder="type this" aria-label="Type this instead" autocomplete="off" spellcheck="false">
+          <button type="submit">Add</button>
+        </form>
+        <ul class="rules" id="rules"></ul>
+        <div class="error" id="dict-error" role="alert"></div>
+      </div>
+    </section>
+
+    <section class="rise">
+      <div class="eyebrow">History</div>
+      <div class="card">
+        <div class="row">
+          <div>
+            <div class="label">Keep a history</div>
+            <div class="desc">Find, copy or paste past dictations again. Stored only on this PC.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="history_enabled" aria-label="Keep a history"></label>
+        </div>
+        <div class="row">
+          <div>
+            <div class="label">Keep entries for</div>
+          </div>
+          <select id="history_days" aria-label="Keep entries for">
+            <option value="1">1 day</option>
+            <option value="7">7 days</option>
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+            <option value="0">Until I delete them</option>
+          </select>
+        </div>
+        <div class="row">
+          <div><div class="label">Past dictations</div></div>
+          <button id="open-history">Open history</button>
         </div>
       </div>
     </section>

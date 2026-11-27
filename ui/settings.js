@@ -9,7 +9,8 @@ function render(s) {
   current = s;
   $("keycap").textContent = s.hotkey_label;
   $("key-desc").textContent = `Hold ${s.hotkey_label}, speak, let go. The text is typed where your cursor is.`;
-  for (const k of ["double_tap_hands_free", "cleanup_enabled", "preview_caption", "start_with_windows"]) $(k).checked = s[k];
+  for (const k of ["double_tap_hands_free", "cleanup_enabled", "preview_caption", "start_with_windows", "history_enabled"]) $(k).checked = s[k];
+  $("history_days").value = String(s.history_days);
   const mic = $("mic");
   mic.replaceChildren();
   const def = new Option("Windows default", "");
@@ -37,10 +38,70 @@ async function save(patch) {
   }
 }
 
-for (const k of ["double_tap_hands_free", "cleanup_enabled", "preview_caption", "start_with_windows"]) {
+for (const k of ["double_tap_hands_free", "cleanup_enabled", "preview_caption", "start_with_windows", "history_enabled"]) {
   $(k).addEventListener("change", (e) => save({ [k]: e.target.checked }));
 }
 $("mic").addEventListener("change", (e) => save({ mic_device: e.target.value }));
+$("history_days").addEventListener("change", (e) => save({ history_days: Number(e.target.value) }));
+$("open-history").addEventListener("click", () => invoke("open_history"));
+
+// ---- dictionary ----
+function el(tag, className, text) {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function removeButton(label, onClick) {
+  const x = el("button", "", "\u2715");
+  x.setAttribute("aria-label", label);
+  x.addEventListener("click", onClick);
+  return x;
+}
+
+function renderDict(d) {
+  $("terms").replaceChildren(...d.terms.map((t) => {
+    const li = el("li", "", t.term);
+    li.appendChild(removeButton(`Remove ${t.term}`, async () => renderDict(await invoke("dict_remove_term", { id: t.id }))));
+    return li;
+  }));
+  $("rules").replaceChildren(...d.rules.map((r) => {
+    const li = el("li");
+    li.append(
+      el("span", "find", `\u201c${r.find}\u201d`),
+      el("span", "to", "\u2192"),
+      el("span", "rep", r.replace || "(nothing)"),
+      removeButton(`Remove replacement for ${r.find}`, async () => renderDict(await invoke("dict_remove_rule", { id: r.id }))),
+    );
+    return li;
+  }));
+}
+
+async function dictCall(cmd, args) {
+  try {
+    renderDict(await invoke(cmd, args));
+    $("dict-error").textContent = "";
+    return true;
+  } catch (e) {
+    $("dict-error").textContent = String(e);
+    return false;
+  }
+}
+
+$("term-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const v = $("term").value.trim();
+  if (v && (await dictCall("dict_add_term", { term: v }))) $("term").value = "";
+});
+$("rule-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (await dictCall("dict_set_rule", { find: $("find").value, replace: $("replace").value })) {
+    $("find").value = "";
+    $("replace").value = "";
+    $("find").focus();
+  }
+});
 
 // ---- hotkey capture (saywellKeyFor comes from keys.js) ----
 
@@ -91,4 +152,5 @@ listen("status", ({ payload }) => showStatus(payload));
 (async () => {
   render(await invoke("get_settings"));
   showStatus(await invoke("engine_status"));
+  renderDict(await invoke("dict_get"));
 })();

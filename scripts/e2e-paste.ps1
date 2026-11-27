@@ -12,7 +12,12 @@ param(
   [ValidateSet('hold', 'doubletap', 'cancel')][string]$Mode = 'hold',
   # Optional: save a PNG of the overlay window (only its own rectangle) 1 s before the key is released.
   [string]$Shot = '',
-  [switch]$Caption
+  [switch]$Caption,
+  # Optional dictionary for the test profile: comma-separated terms and one "find=>replace" rule.
+  [string]$Terms = '',
+  [string]$Rule = '',
+  # Expected text, if different from the clip's reference (e.g. after a replacement rule).
+  [string]$Expect = ''
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms
@@ -39,7 +44,11 @@ $env:APPDATA = Join-Path $env:TEMP "saywell-e2e-profile-$PID"
 New-Item -ItemType Directory -Force (Join-Path $env:APPDATA 'Saywell') | Out-Null
 Set-Content (Join-Path $env:APPDATA 'Saywell\settings.toml') "hotkey_vk = 135`nhotkey_label = `"F24`"`npreview_caption = $(if ($Caption) { 'true' } else { 'false' })`n"
 $log = Join-Path $env:APPDATA 'Saywell\logs\saywell.log'
-if ($Shot) { $env:RUST_LOG = 'info,saywell_lib::ui=debug' } # logs the overlay position
+$db = Join-Path $env:APPDATA 'Saywell\saywell.db'
+$dbTool = Join-Path $PSScriptRoot 'e2e_db.py'
+if ($Terms -or $Rule) { python -I $dbTool seed $db $Terms $Rule }
+if ($Expect) { $expected = $Expect }
+if ($Shot) { $env:RUST_LOG = 'info,saywell_lib::ui=debug,saywell_lib::controller=debug' } # logs the overlay position
 $logStart = if (Test-Path $log) { (Get-Item $log).Length } else { 0 }
 function NewLog { if (-not (Test-Path $log)) { return '' }; $fs = [IO.File]::Open($log, 'Open', 'Read', 'ReadWrite'); $fs.Seek($logStart, 'Begin') | Out-Null; $t = (New-Object IO.StreamReader($fs)).ReadToEnd(); $fs.Close(); $t }
 
@@ -106,7 +115,12 @@ try {
   do { Start-Sleep -Milliseconds 200; $new = NewLog } until ($new -match 'dictation: |failed|error' -or (Get-Date) -gt $deadline)
   Start-Sleep -Milliseconds 500
 
-  $got = if (Test-Path $outFile) { "$(Get-Content $outFile -Raw)".Trim() } else { '' }
+  # The test window saves its text every 200 ms; give it up to 3 s before concluding nothing arrived.
+  $readUntil = (Get-Date).AddSeconds(3)
+  do {
+    $got = if (Test-Path $outFile) { "$(Get-Content $outFile -Raw -ErrorAction SilentlyContinue)".Trim() } else { '' }
+    if (-not $got) { Start-Sleep -Milliseconds 250 }
+  } until ($got -or (Get-Date) -gt $readUntil)
   $clipNow = [System.Windows.Forms.Clipboard]::GetText()
   $timing = ([regex]::Matches($new, 'dictation: .*') | Select-Object -Last 1).Value
 
@@ -114,9 +128,11 @@ try {
   "pasted   : $got"
   "clipboard: $clipNow"
   "log      : $timing"
+  if ($Shot) { "target pid $($target.Id); $(([regex]::Matches($new, 'inserting into foreground pid \d+') | Select-Object -Last 1).Value)" }
   $norm = { param($s) ($s.ToLower() -replace '[^a-z0-9 ]', '' -replace '\s+', ' ').Trim() }
   $ok = $got.Length -gt 0 -and ((& $norm $got) -eq (& $norm $expected) -or $got.Length -ge 0.8 * $expected.Length)
   if ($clipNow -ne 'SAYWELL-SENTINEL') { 'FAIL: clipboard was not restored'; $ok = $false }
+  if (Test-Path $db) { python -I $dbTool history $db }
   $previews = [regex]::Matches($new, 'preview: ').Count
   $handsFree = $new -match 'hands-free recording'
   "previews : $previews   hands-free: $handsFree"
@@ -124,10 +140,14 @@ try {
   if ($ok) { 'E2E PASS' } else { 'E2E FAIL'; exit 1 }
 }
 finally {
-  Remove-Item $outFile -ErrorAction SilentlyContinue
-  Start-Sleep -Milliseconds 300
-  Remove-Item -Recurse -Force $env:APPDATA -ErrorAction SilentlyContinue
   if ($app -and -not $app.HasExited) { Stop-Process -Id $app.Id -ErrorAction SilentlyContinue }
   if ($target -and -not $target.HasExited) { Stop-Process -Id $target.Id -ErrorAction SilentlyContinue; $target.WaitForExit(3000) | Out-Null }
   Remove-Item $outFile -ErrorAction SilentlyContinue
+  # The speech servers exit with Saywell but may hold their log files for a moment.
+  if ($app) { $app.WaitForExit(5000) | Out-Null }
+  $until = (Get-Date).AddSeconds(8)
+  while ((Test-Path $env:APPDATA) -and (Get-Date) -lt $until) {
+    Remove-Item -Recurse -Force $env:APPDATA -ErrorAction SilentlyContinue
+    if (Test-Path $env:APPDATA) { Start-Sleep -Milliseconds 400 }
+  }
 }

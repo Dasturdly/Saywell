@@ -66,6 +66,11 @@ pub struct Cleaned {
 /// Clean `raw` (already stripped of Whisper markers). `llm` is `None` when cleanup is off or the
 /// model is still loading.
 pub fn clean(llm: Option<&Arc<Llm>>, raw: &str, enabled: bool) -> Cleaned {
+    clean_with_glossary(llm, raw, enabled, &[])
+}
+
+/// Like [`clean`], telling the model the user's preferred spellings (personal dictionary).
+pub fn clean_with_glossary(llm: Option<&Arc<Llm>>, raw: &str, enabled: bool, glossary: &[String]) -> Cleaned {
     let fallback = |source| Cleaned { text: remove_fillers(raw), source };
     if !enabled {
         return fallback(Source::Off);
@@ -78,10 +83,19 @@ pub fn clean(llm: Option<&Arc<Llm>>, raw: &str, enabled: bool) -> Cleaned {
     };
     let max_tokens = (raw.split_whitespace().count() as u32 * 3).max(64);
     let user = format!("<transcript>{raw}</transcript>");
-    match llm.chat_with_examples(SYSTEM, EXAMPLES, &user, max_tokens, TIMEOUT) {
+    let system = if glossary.is_empty() {
+        SYSTEM.to_string()
+    } else {
+        format!(
+            "{SYSTEM}
+Preferred spellings: when the speaker says one of these words or names, write it exactly like this: {}.",
+            glossary.join(", ")
+        )
+    };
+    match llm.chat_with_examples(&system, EXAMPLES, &user, max_tokens, TIMEOUT) {
         Ok(out) => {
             let out = strip_wrapping(&out);
-            match check(raw, &out) {
+            match check_with_glossary(raw, &out, glossary) {
                 Ok(()) => Cleaned { text: out, source: Source::Llm },
                 Err(why) => fallback(Source::Fallback(why)),
             }
@@ -111,6 +125,11 @@ fn words(s: &str) -> Vec<String> {
 /// Guardrails: reject output that is empty, much longer or shorter than the input, a reply,
 /// or made of words the speaker did not say (an answer or a translation).
 pub fn check(raw: &str, out: &str) -> Result<(), String> {
+    check_with_glossary(raw, out, &[])
+}
+
+/// Like [`check`]; words from the glossary count as said (the model may correct their spelling).
+pub fn check_with_glossary(raw: &str, out: &str, glossary: &[String]) -> Result<(), String> {
     if out.is_empty() {
         return Err("empty output".into());
     }
@@ -119,7 +138,8 @@ pub fn check(raw: &str, out: &str) -> Result<(), String> {
     if !(0.3..=1.3).contains(&ratio) {
         return Err(format!("length ratio {ratio:.2}"));
     }
-    let said = words(raw);
+    let mut said = words(raw);
+    said.extend(glossary.iter().flat_map(|g| words(g)));
     let new_words = words(out).iter().filter(|w| !said.contains(w)).count();
     let new_frac = new_words as f32 / words(out).len().max(1) as f32;
     if new_words > 2 && new_frac > 0.25 {
@@ -167,6 +187,15 @@ mod tests {
     fn allows_reply_words_the_speaker_said() {
         let raw = "sure I can do that by friday";
         assert_eq!(check(raw, "Sure, I can do that by Friday."), Ok(()));
+    }
+
+    #[test]
+    fn glossary_words_count_as_said() {
+        let raw = "deploy it to cooper netties, ping anna lisa and check graph on a";
+        let out = "Deploy it to Kubernetes, ping Anneliese and check Grafana.";
+        assert!(check(raw, out).is_err(), "without the glossary these look like new words");
+        let glossary = vec!["Kubernetes".to_string(), "Anneliese".to_string(), "Grafana".to_string()];
+        assert_eq!(check_with_glossary(raw, out, &glossary), Ok(()));
     }
 
     #[test]

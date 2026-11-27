@@ -21,6 +21,10 @@ pub struct Settings {
     pub double_tap_hands_free: bool,
     /// Show a caption of the words above the bar while speaking (transcribes about once a second).
     pub preview_caption: bool,
+    /// Keep a history of dictations (stored only on this PC).
+    pub history_enabled: bool,
+    /// Delete history older than this many days; 0 keeps it forever.
+    pub history_days: u32,
     /// Microphone name; `None` means the Windows default input device.
     pub mic_device: Option<String>,
     /// Recordings are cut off after this many seconds.
@@ -39,7 +43,9 @@ impl Default for Settings {
             hotkey_vk: 0xA3,
             hotkey_label: "Right Ctrl".into(),
             double_tap_hands_free: true,
-            preview_caption: false,
+            preview_caption: true,
+            history_enabled: true,
+            history_days: 30,
             mic_device: None,
             max_record_secs: 360,
             cleanup_enabled: true,

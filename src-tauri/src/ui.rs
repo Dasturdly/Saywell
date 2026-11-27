@@ -7,10 +7,11 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 
-use crate::{audio, hotkey, models, settings, settings_snapshot, winsys, SETTINGS};
+use crate::store::{HistoryEntry, Rule, Term};
+use crate::{audio, hotkey, insert, models, settings, settings_snapshot, winsys, SETTINGS, STORE};
 
-const OVERLAY_W: f64 = 440.0;
-const OVERLAY_H: f64 = 96.0;
+const OVERLAY_W: f64 = 480.0;
+const OVERLAY_H: f64 = 116.0;
 /// Bumped on every overlay change, so a delayed "hide" never hides a newer state.
 static OVERLAY_GEN: AtomicU64 = AtomicU64::new(0);
 
@@ -120,6 +121,10 @@ pub fn open_settings(app: &AppHandle) {
     open_window(app, "settings", "settings.html", "Saywell settings", 560.0, 640.0);
 }
 
+pub fn open_history_window(app: &AppHandle) {
+    open_window(app, "history", "history.html", "Saywell history", 640.0, 680.0);
+}
+
 pub fn open_onboarding(app: &AppHandle) {
     open_window(app, "onboarding", "onboarding.html", "Welcome to Saywell", 620.0, 600.0);
 }
@@ -135,6 +140,8 @@ pub struct SettingsView {
     cleanup_enabled: bool,
     mic_device: Option<String>,
     start_with_windows: bool,
+    history_enabled: bool,
+    history_days: u32,
     mics: Vec<String>,
     models_dir: String,
     version: &'static str,
@@ -152,6 +159,8 @@ pub fn get_settings() -> SettingsView {
         cleanup_enabled: s.cleanup_enabled,
         mic_device: s.mic_device,
         start_with_windows: winsys::autostart_enabled(),
+        history_enabled: s.history_enabled,
+        history_days: s.history_days,
         mics: audio::input_devices(),
         models_dir: s.models_dir.display().to_string(),
         version: env!("CARGO_PKG_VERSION"),
@@ -168,6 +177,8 @@ pub struct SettingsPatch {
     /// `Some("")` means the Windows default.
     mic_device: Option<String>,
     start_with_windows: Option<bool>,
+    history_enabled: Option<bool>,
+    history_days: Option<u32>,
 }
 
 /// Apply and save the given changes; returns the new settings.
@@ -199,9 +210,21 @@ pub fn update_settings(app: AppHandle, patch: SettingsPatch) -> Result<SettingsV
         if let Some(m) = patch.mic_device {
             s.mic_device = (!m.is_empty()).then_some(m);
         }
+        if let Some(v) = patch.history_enabled {
+            s.history_enabled = v;
+        }
+        if let Some(d) = patch.history_days {
+            s.history_days = d;
+            if let Some(store) = STORE.get() {
+                let _ = store.prune_history(d);
+            }
+        }
         s.save(&settings::settings_path()).map_err(|e| format!("Couldn't save settings: {e:#}"))?;
     }
     crate::refresh_status(&app);
+    if patch.history_days.is_some() {
+        crate::history_changed(&app);
+    }
     Ok(get_settings())
 }
 
@@ -345,6 +368,111 @@ pub fn page_key(vk: u32, down: bool) {
 /// Deliver dictated text to Saywell's own focused window (its page inserts it at the cursor).
 pub fn insert_into_own_window(app: &AppHandle, text: &str) {
     let _ = app.emit("insert-text", text);
+}
+
+// ---- history ----
+
+fn store() -> Result<&'static crate::store::Store, String> {
+    STORE.get().ok_or_else(|| "History isn't available (see the log).".to_string())
+}
+
+#[tauri::command]
+pub fn history_list(query: String, offset: i64) -> Result<Vec<HistoryEntry>, String> {
+    store()?.list_history(query.trim(), 100, offset).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn history_delete(app: AppHandle, id: i64) -> Result<(), String> {
+    store()?.delete_history(id).map_err(|e| e.to_string())?;
+    crate::history_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn history_clear(app: AppHandle) -> Result<(), String> {
+    store()?.clear_history().map_err(|e| e.to_string())?;
+    crate::history_changed(&app);
+    Ok(())
+}
+
+/// Put an entry on the clipboard (stays there, unlike dictation's temporary use of it).
+#[tauri::command]
+pub fn history_copy(id: i64) -> Result<(), String> {
+    let text = store()?.history_text(id).map_err(|e| e.to_string())?.ok_or("That entry no longer exists.")?;
+    arboard::Clipboard::new().and_then(|mut c| c.set_text(text)).map_err(|e| e.to_string())
+}
+
+/// Paste an entry into the app you were using: hide the history window, let focus return, paste.
+#[tauri::command]
+pub fn history_repaste(app: AppHandle, id: i64) {
+    if let Some(w) = app.get_webview_window("history") {
+        let _ = w.minimize();
+    }
+    repaste(&app, id);
+}
+
+/// Paste a history entry into whatever window gets focus shortly (tray menu or history window).
+pub fn repaste(_app: &AppHandle, id: i64) {
+    let Some(text) = STORE.get().and_then(|s| s.history_text(id).ok().flatten()) else { return };
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(350)); // menu/window closes, focus returns
+        if winsys::foreground_is_ours() {
+            log::info!("re-paste skipped: a Saywell window has focus");
+            return;
+        }
+        if let Err(e) = insert::paste(&text) {
+            log::error!("re-paste failed: {e:#}");
+        }
+    });
+}
+
+#[tauri::command]
+pub fn open_history(app: AppHandle) {
+    open_history_window(&app);
+}
+
+// ---- dictionary ----
+
+#[derive(Serialize)]
+pub struct DictionaryView {
+    terms: Vec<Term>,
+    rules: Vec<Rule>,
+}
+
+#[tauri::command]
+pub fn dict_get() -> Result<DictionaryView, String> {
+    let s = store()?;
+    Ok(DictionaryView { terms: s.terms().map_err(|e| e.to_string())?, rules: s.rules().map_err(|e| e.to_string())? })
+}
+
+#[tauri::command]
+pub fn dict_add_term(term: String) -> Result<DictionaryView, String> {
+    if term.trim().chars().count() > 60 {
+        return Err("Keep each word or name under 60 characters.".into());
+    }
+    store()?.add_term(&term).map_err(|e| e.to_string())?;
+    dict_get()
+}
+
+#[tauri::command]
+pub fn dict_remove_term(id: i64) -> Result<DictionaryView, String> {
+    store()?.remove_term(id).map_err(|e| e.to_string())?;
+    dict_get()
+}
+
+#[tauri::command]
+pub fn dict_set_rule(find: String, replace: String) -> Result<DictionaryView, String> {
+    if find.trim().is_empty() {
+        return Err("Type what you'll say first.".into());
+    }
+    store()?.set_rule(&find, &replace).map_err(|e| e.to_string())?;
+    dict_get()
+}
+
+#[tauri::command]
+pub fn dict_remove_rule(id: i64) -> Result<DictionaryView, String> {
+    store()?.remove_rule(id).map_err(|e| e.to_string())?;
+    dict_get()
 }
 
 #[tauri::command]

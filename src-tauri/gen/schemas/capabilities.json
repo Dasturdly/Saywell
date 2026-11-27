@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Saywell's own pages: call app commands and listen for events. No file system, shell or network access.","local":true,"windows":["overlay","settings","onboarding"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"Saywell's own pages: call app commands and listen for events. No file system, shell or network access.","local":true,"windows":["overlay","settings","onboarding","history"],"permissions":["core:default"]}}

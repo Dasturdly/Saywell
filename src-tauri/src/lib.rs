@@ -6,6 +6,7 @@
 pub mod audio;
 pub mod cleanup;
 pub mod controller;
+pub mod dictionary;
 pub mod hotkey;
 pub mod insert;
 pub mod llm;
@@ -13,6 +14,7 @@ pub mod models;
 pub mod postprocess;
 pub mod settings;
 pub mod sidecar;
+pub mod store;
 pub mod stt;
 pub mod ui;
 pub mod winsys;
@@ -26,7 +28,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use tauri::image::Image;
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, Wry};
 
@@ -44,9 +46,15 @@ static ENGINES_STARTED: AtomicBool = AtomicBool::new(false);
 /// `--inject-wav` test clip, replacing the microphone.
 static INJECTED: OnceLock<Option<Clip>> = OnceLock::new();
 static STATUS: Mutex<String> = Mutex::new(String::new());
+/// History and dictionary database; `None` if it could not be opened (dictation still works).
+static STORE: OnceLock<store::Store> = OnceLock::new();
+const RECENT_COUNT: usize = 5;
 
 /// Tray checkbox for cleanup, kept so the settings window can update it.
 struct TrayCleanupItem(CheckMenuItem<Wry>);
+
+/// Tray "Paste again" submenu, rebuilt whenever history changes.
+struct TrayRecents(Submenu<Wry>);
 
 fn settings_snapshot() -> Settings {
     SETTINGS.get().map(|s| s.lock().unwrap().clone()).unwrap_or_default()
@@ -65,6 +73,8 @@ struct Cli {
     setup: bool,
     /// Open the settings window at start.
     settings: bool,
+    /// Open the history window at start.
+    history: bool,
 }
 
 fn parse_cli() -> Cli {
@@ -77,6 +87,7 @@ fn parse_cli() -> Cli {
             "--clean-file" => cli.clean_file = args.next().map(PathBuf::from),
             "--setup" => cli.setup = true,
             "--settings" => cli.settings = true,
+            "--history" => cli.history = true,
             other => eprintln!("ignoring unknown argument {other}"),
         }
     }
@@ -158,6 +169,17 @@ fn run_app(settings: Settings, cli: Cli) {
         clip
     });
     let _ = INJECTED.set(injected);
+    match store::Store::open(&settings::data_dir().join("saywell.db")) {
+        Ok(s) => {
+            if let Ok(n) = s.prune_history(settings.history_days) {
+                if n > 0 {
+                    log::info!("removed {n} history entries older than {} days", settings.history_days);
+                }
+            }
+            let _ = STORE.set(s);
+        }
+        Err(e) => log::error!("history and dictionary unavailable: {e:#}"),
+    }
 
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -172,6 +194,17 @@ fn run_app(settings: Settings, cli: Cli) {
             ui::close_setup,
             ui::engine_status,
             ui::page_key,
+            ui::history_list,
+            ui::history_delete,
+            ui::history_clear,
+            ui::history_copy,
+            ui::history_repaste,
+            ui::dict_get,
+            ui::dict_add_term,
+            ui::dict_remove_term,
+            ui::dict_set_rule,
+            ui::dict_remove_rule,
+            ui::open_history,
         ])
         .setup(move |app| {
             let handle = app.handle();
@@ -187,6 +220,9 @@ fn run_app(settings: Settings, cli: Cli) {
             }
             if cli.settings {
                 ui::open_settings(handle);
+            }
+            if cli.history {
+                ui::open_history_window(handle);
             }
             Ok(())
         })
@@ -211,11 +247,16 @@ fn run_app(settings: Settings, cli: Cli) {
 fn build_tray(app: &AppHandle) -> Result<()> {
     let enabled = settings_snapshot().cleanup_enabled;
     let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
+    let history_item = MenuItem::with_id(app, "history", "History…", true, None::<&str>)?;
+    let recent = Submenu::with_items(app, "Paste again", true, &[])?;
     let cleanup = CheckMenuItem::with_id(app, "cleanup", "Clean up text with local AI", true, enabled, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Saywell", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&settings_item, &cleanup, &sep, &quit])?;
+    let sep2 = PredefinedMenuItem::separator(app)?;
+    let menu = Menu::with_items(app, &[&recent, &history_item, &sep, &settings_item, &cleanup, &sep2, &quit])?;
     app.manage(TrayCleanupItem(cleanup.clone()));
+    app.manage(TrayRecents(recent.clone()));
+    refresh_recents(app);
     TrayIconBuilder::with_id("main")
         .icon(Image::from_bytes(include_bytes!("../icons/icon.png"))?)
         .tooltip("Saywell: starting…")
@@ -223,11 +264,48 @@ fn build_tray(app: &AppHandle) -> Result<()> {
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "quit" => app.exit(0),
             "settings" => ui::open_settings(app),
+            "history" => ui::open_history_window(app),
+            id if id.starts_with("recent-") => {
+                if let Ok(hid) = id[7..].parse::<i64>() {
+                    ui::repaste(app, hid);
+                }
+            }
             "cleanup" => set_cleanup(app, cleanup.is_checked().unwrap_or(false)),
             _ => {}
         })
         .build(app)?;
     Ok(())
+}
+
+/// After a dictation is saved or history changes: refresh the tray list and open History window.
+fn history_changed(app: &AppHandle) {
+    refresh_recents(app);
+    let _ = app.emit("history-changed", ());
+}
+
+fn refresh_recents(app: &AppHandle) {
+    let Some(tray) = app.try_state::<TrayRecents>() else { return };
+    let sub = &tray.0;
+    if let Ok(items) = sub.items() {
+        for item in items {
+            let _ = sub.remove(&item);
+        }
+    }
+    let entries = STORE.get().and_then(|s| s.list_history("", RECENT_COUNT as i64, 0).ok()).unwrap_or_default();
+    if entries.is_empty() {
+        if let Ok(none) = MenuItem::with_id(app, "recent-none", "Nothing yet", false, None::<&str>) {
+            let _ = sub.append(&none);
+        }
+    }
+    for e in entries {
+        let mut label: String = e.text.chars().take(48).collect();
+        if e.text.chars().count() > 48 {
+            label.push('…');
+        }
+        if let Ok(item) = MenuItem::with_id(app, format!("recent-{}", e.id), label, true, None::<&str>) {
+            let _ = sub.append(&item);
+        }
+    }
 }
 
 fn set_status(app: &AppHandle, text: &str) {

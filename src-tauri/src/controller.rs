@@ -13,7 +13,7 @@ use tauri::AppHandle;
 
 use crate::audio::{Clip, Recorder};
 use crate::hotkey::{self, HotkeyEvent};
-use crate::{cleanup, insert, postprocess, settings_snapshot, ui, LLM, STT};
+use crate::{cleanup, dictionary, insert, postprocess, settings_snapshot, ui, LLM, STORE, STT};
 
 /// A press shorter than this may be the first half of a double-tap.
 const TAP_MAX: Duration = Duration::from_millis(300);
@@ -173,9 +173,10 @@ impl Controller {
         let session = SESSION.load(Ordering::SeqCst);
         let (app, busy) = (self.app.clone(), self.preview_busy.clone());
         busy.store(true, Ordering::SeqCst);
+        let prompt = dictionary::whisper_prompt(&dictionary_terms());
         std::thread::spawn(move || {
             let t0 = Instant::now();
-            if let Ok(raw) = stt.transcribe(&clip) {
+            if let Ok(raw) = stt.transcribe_with_prompt(&clip, &prompt) {
                 let text = postprocess::clean_transcript(&raw);
                 log::info!(
                     "preview: {:.1}s of audio, {} chars in {} ms",
@@ -235,13 +236,20 @@ fn process(app: &AppHandle, clip: &Clip, released: Instant) -> Result<(), String
         log::warn!("speech model still loading; dictation dropped");
         return Err("Still loading the speech model…".into());
     };
+    let terms = dictionary_terms();
+    let rules = STORE.get().and_then(|s| s.rules().ok()).unwrap_or_default();
+    let prompt = dictionary::whisper_prompt(&terms);
     let t_stt = Instant::now();
-    let raw = stt.transcribe(clip).map_err(|e| {
+    let raw = stt.transcribe_with_prompt(clip, &prompt).map_err(|e| {
         log::error!("transcription failed: {e:#}");
         "Transcription failed. See the log.".to_string()
     })?;
     let stt_ms = t_stt.elapsed().as_millis();
-    let transcript = postprocess::clean_transcript(&raw);
+    let mut transcript = postprocess::clean_transcript(&raw);
+    // On very short or unclear audio Whisper may just repeat its prompt back.
+    if !prompt.is_empty() && transcript.trim_end_matches('.') == prompt.trim_end_matches('.') {
+        transcript.clear();
+    }
     if transcript.is_empty() {
         crate::debug_capture(clip, &raw, "");
         log::info!("nothing recognised (stt {stt_ms} ms)");
@@ -250,7 +258,7 @@ fn process(app: &AppHandle, clip: &Clip, released: Instant) -> Result<(), String
     let enabled = settings_snapshot().cleanup_enabled;
     let llm = LLM.lock().unwrap().clone();
     let t_llm = Instant::now();
-    let cleaned = cleanup::clean(llm.as_ref(), &transcript, enabled);
+    let cleaned = cleanup::clean_with_glossary(llm.as_ref(), &transcript, enabled, &terms);
     let llm_ms = t_llm.elapsed().as_millis();
     let source = match &cleaned.source {
         cleanup::Source::Llm => "llm",
@@ -261,12 +269,14 @@ fn process(app: &AppHandle, clip: &Clip, released: Instant) -> Result<(), String
             "fallback"
         }
     };
-    let text = cleaned.text;
+    let text = dictionary::apply_rules(&cleaned.text, &rules);
     crate::debug_capture(clip, &raw, &text);
     if text.is_empty() {
         return Ok(());
     }
     let t_ins = Instant::now();
+    log::debug!("inserting into foreground pid {}", crate::winsys::foreground_pid());
+    let target_app = crate::winsys::foreground_app();
     if crate::winsys::foreground_is_ours() {
         ui::insert_into_own_window(app, &text);
     } else {
@@ -284,5 +294,26 @@ fn process(app: &AppHandle, clip: &Clip, released: Instant) -> Result<(), String
         released.elapsed().as_millis(),
         text.chars().count()
     );
+    save_history(app, &target_app, &transcript, &text, clip, released);
     Ok(())
+}
+
+fn dictionary_terms() -> Vec<String> {
+    STORE.get().and_then(|s| s.terms().ok()).unwrap_or_default().into_iter().map(|t| t.term).collect()
+}
+
+fn save_history(app: &AppHandle, target_app: &str, raw: &str, text: &str, clip: &Clip, released: Instant) {
+    let s = settings_snapshot();
+    let Some(store) = STORE.get() else { return };
+    if !s.history_enabled {
+        return;
+    }
+    let audio_ms = (clip.duration_secs() * 1000.0) as i64;
+    let latency_ms = released.elapsed().as_millis() as i64;
+    if let Err(e) = store.add_history(target_app, raw, text, audio_ms, latency_ms) {
+        log::error!("could not save history: {e:#}");
+        return;
+    }
+    let _ = store.prune_history(s.history_days);
+    crate::history_changed(app);
 }

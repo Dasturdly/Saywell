@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Saywell history</title>
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="history.css">
+</head>
+<body class="window">
+  <main>
+    <header class="top rise">
+      <div class="brand">
+        <div class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+        <h1>History</h1>
+      </div>
+      <input id="search" type="search" placeholder="Search your dictations" aria-label="Search history" autocomplete="off" spellcheck="false">
+    </header>
+    <p class="note rise" id="summary"></p>
+    <ol class="list rise" id="list" aria-live="polite"></ol>
+    <div class="empty rise" id="empty" hidden>
+      <div class="mark big" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      <p id="empty-text">Nothing here yet. Your dictations will show up here.</p>
+    </div>
+    <button id="more" hidden>Show older</button>
+    <footer class="foot rise">
+      <span class="note">Stored only on this PC. <span id="retention"></span></span>
+      <button id="clear" class="danger">Clear all</button>
+    </footer>
+  </main>
+  <script src="keys.js"></script>
+  <script src="history.js"></script>
+</body>
+</html>

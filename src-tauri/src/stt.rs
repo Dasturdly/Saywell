@@ -40,11 +40,17 @@ impl Stt {
 
     /// Transcribe a 16 kHz mono clip. Returns Whisper's raw text.
     pub fn transcribe(&self, clip: &Clip) -> Result<String> {
+        self.transcribe_with_prompt(clip, "")
+    }
+
+    /// Like [`transcribe`](Self::transcribe), with a spelling hint (personal dictionary terms).
+    pub fn transcribe_with_prompt(&self, clip: &Clip, prompt: &str) -> Result<String> {
         let wav = encode_wav(clip)?;
         let form = Form::new()
             .part("file", Part::bytes(wav).file_name("audio.wav").mime_str("audio/wav")?)
             .text("response_format", "text")
-            .text("temperature", "0");
+            .text("temperature", "0")
+            .text("prompt", prompt.to_string());
         let resp = self
             .client
             .post(format!("{}/inference", self.server.base_url()))

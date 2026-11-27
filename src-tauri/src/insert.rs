@@ -14,7 +14,10 @@ pub fn paste(text: &str) -> Result<()> {
     let mut cb = arboard::Clipboard::new()?;
     let previous = cb.get_text().ok(); // non-text clipboard contents are not preserved yet (M5)
     cb.set_text(text.to_owned())?;
-    std::thread::sleep(Duration::from_millis(20));
+    // Clipboard watchers (Windows clipboard history, clipboard managers) open the clipboard right
+    // after it changes. If the target app tries to read it at that moment, some apps silently
+    // paste nothing. 20 ms failed about 1 in 3 E2E runs; 80 ms passed 12 of 12.
+    std::thread::sleep(Duration::from_millis(80));
     send_ctrl_v()?;
     // Give the target app time to read the clipboard before restoring it.
     std::thread::sleep(Duration::from_millis(150));

@@ -58,3 +58,13 @@ The guardrails reject output that is empty, a reply ("Sure…", "Here's…"), ou
 | single instance | a second copy detects the first, shows "already running" and exits |
 | model URLs | Hugging Face `X-Linked-Size` and `X-Linked-ETag` (SHA-256) match the pinned values for both models; servers support range requests, so interrupted downloads resume |
 | downloader | resumable, SHA-256-verified, deletes a corrupt file. Unit-tested against a local HTTP server. `SAYWELL_MODEL_MIRROR=<url>` points it at a local mirror for offline installs |
+
+## M4 results: personal dictionary and history
+| | result |
+|---|---|
+| dictionary → Whisper prompt | clip `dict01` (TTS): without the dictionary "**Corvex** invoice"; with it "**Quorvex** invoice". 3 → 4 of 4 terms spelled right |
+| dictionary → cleanup AI | terms are sent as a spelling glossary, and the guardrail counts them as said, so corrected spellings aren't rejected as "new words" |
+| replacement rules | whole words/phrases, case-insensitive, longest first. E2E: "Quorvex invoice" → "bill from Quorvex Ltd" |
+| history | SQLite in `%APPDATA%\Saywell\saywell.db`: text, raw text, target app, audio length, latency. Search, copy, paste again, delete, clear all (VACUUMs the file). Pruned to 30 days by default; can be paused |
+| paste reliability | Ctrl+V was sent 20 ms after setting the clipboard; clipboard watchers (e.g. Windows clipboard history) can still be reading then, and some apps silently paste nothing. 20 ms: about 1 in 3 E2E runs failed; 80 ms: 12 of 12 passed |
+| caption | on by default: the last two lines of your words above the bar, kept while the final text is written; elapsed-time counter in the bar |

@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Saywell's own pages: call app commands and listen for events. No file system, shell or network access.",
-  "windows": ["overlay", "settings", "onboarding"],
+  "windows": ["overlay", "settings", "onboarding", "history"],
   "permissions": ["core:default"]
 }
