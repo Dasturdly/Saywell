@@ -31,8 +31,22 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Path of the Whisper model. Looks in `models_dir` first; debug builds also fall back to the
+    /// repo's git-ignored `models/` folder so a fresh dev checkout works without editing settings.
     pub fn whisper_model_path(&self) -> PathBuf {
-        self.models_dir.join(&self.whisper_model)
+        let primary = self.models_dir.join(&self.whisper_model);
+        if primary.exists() {
+            return primary;
+        }
+        #[cfg(debug_assertions)]
+        {
+            let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("../models").join(&self.whisper_model);
+            if dev.exists() {
+                log::info!("model not in {}; using dev copy {}", self.models_dir.display(), dev.display());
+                return dev;
+            }
+        }
+        primary
     }
 
     /// Load settings, writing defaults to disk if the file does not exist yet.

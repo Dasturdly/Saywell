@@ -62,7 +62,12 @@ pub fn main_entry() {
             Settings::default()
         }
     };
-    log::info!("Saywell {} starting; models in {}", env!("CARGO_PKG_VERSION"), settings.models_dir.display());
+    log::info!(
+        "Saywell {} starting; settings {}; models in {}",
+        env!("CARGO_PKG_VERSION"),
+        settings::settings_path().display(),
+        settings.models_dir.display()
+    );
 
     if !cli.transcribe.is_empty() {
         std::process::exit(match run_transcribe(&settings, &cli.transcribe) {
